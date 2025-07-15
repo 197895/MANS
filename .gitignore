@@ -1,6 +1,5 @@
 analysis/
 figure/
 MANS_figure/
-testdata/
 *.py
 build/
