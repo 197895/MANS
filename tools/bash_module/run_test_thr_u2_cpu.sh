@@ -1,35 +1,23 @@
 #!/bin/bash
 
-# 配置路径
-SZ_Huffman=~/project/sz3/install/bin/sz3
-SZ3_CONFIG=~/project/sz3/tools/sz3/sz3.config
-FSE=~/project/FiniteStateEntropy/fse
-ADT_PATH=~/project/IntZip/sample_data
-ADM16=~/project/mans/build/bin/cpu/mappingcpu_uint16
-ADM32=~/project/mans/build/bin/cpu/mappingcpu_uint32
-PANS_CMP=~/project/mans/build/bin/cpu/cpuans_compress
-PANS_DECMP=~/project/mans/build/bin/cpu/cpuans_decompress
-TEST_DIR=/data/hwj/testdata/u2
-OUTPUT_DIR=./output
-
 run() {
     mkdir -p $OUTPUT_DIR
-    output_file=$OUTPUT_DIR/U2THR.txt
+    output_file=$OUTPUT_DIR/U2THR-cpu.txt
     echo "START" > $output_file
 
-    for dir in `ls $TEST_DIR`
+    for dir in `ls $TEST_DIR_u2`
     do
-        if [[ -d $TEST_DIR"/"$dir ]]; then
+        if [[ -d $TEST_DIR_u2"/"$dir ]]; then
             echo "Processing Directory: $dir"
             echo "DIR: $dir" >> $output_file
 
-            for file in `ls $TEST_DIR"/"$dir`
+            for file in `ls $TEST_DIR_u2"/"$dir`
             do
                 if [[ $file == *".u2" ]]; then
                     echo "   FILE: $file"
                     echo "FILE: $file" >> $output_file
 
-                    file_path="$TEST_DIR/$dir/$file"
+                    file_path="$TEST_DIR_u2/$dir/$file"
                     file_size=$(stat -c%s "$file_path")
                     file_KB=$(echo "$file_size / 1024" | bc)
                     echo "SIZE: $file_KB KB" >> $output_file
@@ -55,10 +43,10 @@ data.tofile(output_file)
                         sz_huffman_output=$(nice -n 20 $SZ_Huffman -I 32 -i "$file_path.u4" -o "$file_path.sz" -1 $num_ele -c $SZ3_CONFIG -M ABS 0.1)
                         huffman_cmp_thr=$(echo "$sz_huffman_output" | grep "Throughput" | awk 'NR==1 {print $5}')
                         huffman_decmp_thr=$(echo "$sz_huffman_output" | grep "Throughput" | awk 'NR==2 {print $9}')
-                        echo "  SZ 16bit Huffman Compressed Thr: $huffman_cmp_thr" >> $output_file
-                        echo "  SZ 16bit Huffman Decompressed Thr: $huffman_decmp_thr" >> $output_file
+                        echo "  16bit Huffman Compressed Thr: $huffman_cmp_thr" >> $output_file
+                        echo "  16bit Huffman Decompressed Thr: $huffman_decmp_thr" >> $output_file
                     else
-                        echo "  Skipping SZ 16bit Huffman throughput test for directory 'exafel'" >> $output_file
+                        echo "  Skipping 16bit Huffman throughput test for directory 'exafel'" >> $output_file
                     fi
 
                     # Step 2: FSE -hf 压缩
@@ -85,10 +73,10 @@ data.tofile(output_file)
                     echo "  FSE ANS Compressed Thr: $fse_f_cmp_thr" >> $output_file
                     echo "  FSE ANS Decompressed Thr: $fse_f_decmp_thr" >> $output_file
 
-                    # Step 4: ADM-FSE 处理
+                    # Step 4: MANS -r 处理
                     adm_output_path="$file_path.adm"
-                    $ADM16 "$file_path" "$adm_output_path"
-                    adm_output=$(nice -n 20 $ADM16 "$file_path" "$adm_output_path")
+                    $ADM16_cpu "$file_path" "$adm_output_path"
+                    adm_output=$(nice -n 20 $ADM16_cpu "$file_path" "$adm_output_path")
                     adm_cmp_time=$(echo "$adm_output" | grep "compress cost" | awk 'NR==1 {print $3}')
                     adm_decmp_time=$(echo "$adm_output" | grep "decompress cost" | awk '{print $3}')
                     $FSE -f "$adm_output_path"
@@ -99,24 +87,24 @@ data.tofile(output_file)
                     decmp_time=$(echo "$decmp_output" | grep "Decompression time" | awk '{print $3}')
                     adm_fse_cmp_thr=$(echo "scale=3; $file_size / 1024 / 1024 / (($adm_cmp_time / 1000) + $cmp_time)" | bc)
                     adm_fse_decmp_thr=$(echo "scale=3; $file_size / 1024 / 1024 / (($adm_decmp_time / 1000) + $decmp_time)" | bc)
-                    echo "  ADM-FSE Compressed Thr: $adm_fse_cmp_thr" >> $output_file
-                    echo "  ADM-FSE Decompressed Thr: $adm_fse_decmp_thr" >> $output_file
+                    echo "  MANS -r Compressed Thr: $adm_fse_cmp_thr" >> $output_file
+                    echo "  MANS -r Decompressed Thr: $adm_fse_decmp_thr" >> $output_file
 
-                    # # Step 6: ADM-PANS
-                    $PANS_CMP "$adm_output_path" "$adm_output_path.pans"
-                    pans_output=$(nice -n 20 $PANS_CMP "$adm_output_path" "$adm_output_path.pans")
+                    # # Step 6: MANS -p
+                    $PANS_CMP_cpu "$adm_output_path" "$adm_output_path.pans"
+                    pans_output=$(nice -n 20 $PANS_CMP_cpu "$adm_output_path" "$adm_output_path.pans")
                     pans_cmp_time=$(echo "$pans_output" | grep "comp   time" | awk 'NR==1 {print $3}')
-                    $PANS_DECMP "$adm_output_path.pans" "$adm_output_path.out"
-                    pans_output=$(nice -n 20 $PANS_DECMP "$adm_output_path.pans" "$adm_output_path.out")
+                    $PANS_DECMP_cpu "$adm_output_path.pans" "$adm_output_path.out"
+                    pans_output=$(nice -n 20 $PANS_DECMP_cpu "$adm_output_path.pans" "$adm_output_path.out")
                     pans_decmp_time=$(echo "$pans_output" | grep "decomp time" | awk 'NR==1 {print $3}')
                     adm_pans_cmp_thr=$(echo "scale=9; $file_size / 1024 / 1024 / (($adm_cmp_time + $pans_cmp_time) / 1000)" | bc)
                     adm_pans_decmp_thr=$(echo "scale=9; $file_size / 1024 / 1024 / (($adm_decmp_time + $pans_decmp_time) / 1000)" | bc)
-                    echo "  ADM-PANS Compressed Thr: $adm_pans_cmp_thr" >> $output_file
-                    echo "  ADM-PANS Decompressed Thr: $adm_pans_decmp_thr" >> $output_file
-                    echo "  ADM CMP Time: $adm_cmp_time" >> $output_file
-                    echo "  ADM DECMP Time: $adm_decmp_time" >> $output_file
-                    echo "  PANS CMP Time: $pans_cmp_time" >> $output_file
-                    echo "  PANS DECMP Time: $pans_decmp_time" >> $output_file
+                    echo "  MANS -p Compressed Thr: $adm_pans_cmp_thr" >> $output_file
+                    echo "  MANS -p Decompressed Thr: $adm_pans_decmp_thr" >> $output_file
+                    # echo "  ADM CMP Time: $adm_cmp_time" >> $output_file
+                    # echo "  ADM DECMP Time: $adm_decmp_time" >> $output_file
+                    # echo "  PANS CMP Time: $pans_cmp_time" >> $output_file
+                    # echo "  PANS DECMP Time: $pans_decmp_time" >> $output_file
 
 
                     # 清理临时文件

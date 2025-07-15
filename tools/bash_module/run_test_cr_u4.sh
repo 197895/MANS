@@ -1,17 +1,5 @@
 #!/bin/bash
 
-# 配置路径
-SZ_Huffman=~/project/sz3/install/bin/sz3
-SZ3_CONFIG=~/project/sz3/tools/sz3/sz3.config
-FSE=~/project/FiniteStateEntropy/fse
-ADT_PATH=~/project/IntZip/sample_data
-ADM16=~/project/mans/build/bin/cpu/mappingcpu_uint16
-ADM32=~/project/mans/build/bin/cpu/mappingcpu_uint32
-PANS_CMP=~/project/mans/build/bin/cpu/cpuans_compress
-PANS_DECMP=~/project/mans/build/bin/cpu/cpuans_decompress
-TEST_DIR=/data/hwj/testdata/u4
-OUTPUT_DIR=./output
-
 ENABLE_ADT_FSE=${ENABLE_ADT_FSE:-1}
 
 # 运行测试
@@ -20,20 +8,20 @@ run() {
     output_file=$OUTPUT_DIR/U4CR.txt
     echo "START" > $output_file
 
-    for dir in `ls $TEST_DIR`
+    for dir in `ls $TEST_DIR_u4`
     do
-        if [[ -d $TEST_DIR"/"$dir ]]; then
+        if [[ -d $TEST_DIR_u4"/"$dir ]]; then
             echo "Processing Directory: $dir"
             echo "DIR: $dir" >> $output_file
 
-            for file in `ls $TEST_DIR"/"$dir`
+            for file in `ls $TEST_DIR_u4"/"$dir`
             do
 
                 if [[ $file == *".u4" ]]; then
                     echo "   FILE: $file"
                     echo "FILE: $file" >> $output_file
                                          
-                    file_path=$TEST_DIR"/"$dir"/"$file
+                    file_path=$TEST_DIR_u4"/"$dir"/"$file
                     file_size=$(stat -c%s "$file_path")
                     file_KB=$(echo "$file_size / 1024" | bc)
                     echo "SIZE: $file_KB KB" >> $output_file
@@ -70,20 +58,20 @@ run() {
 
                     # Step 5: MANS -R 
                     adm_output_path="$file_path.adm"
-                    $ADM32 "$file_path" "$adm_output_path"
+                    $ADM32_cpu "$file_path" "$adm_output_path"
                     $FSE -f "$adm_output_path"
                     adm_fse_size=$(stat -c%s "$adm_output_path.fse")
                     adm_fse_cr=$(echo "scale=3; $file_size / $adm_fse_size" | bc)
                     echo "  ADM-FSE Compressed Ratio: $adm_fse_cr" >> $output_file
 
                     # Step 6: MANS -P
-                    $PANS_CMP "$adm_output_path" "$adm_output_path.pans"
+                    $PANS_CMP_cpu "$adm_output_path" "$adm_output_path.pans"
                     adm_pans_size=$(stat -c%s "$adm_output_path.pans")
                     adm_pans_cr=$(echo "scale=3; $file_size / $adm_pans_size" | bc)
                     echo "  ADM-PANS Compressed Ratio: $adm_pans_cr" >> $output_file
 
                     # Step 7: PANS
-                    $PANS_CMP "$file_path" "$file_path.out"
+                    $PANS_CMP_cpu "$file_path" "$file_path.out"
                     pans_size=$(stat -c%s "$file_path.out")
                     pans_cr=$(echo "scale=3; $file_size / $pans_size" | bc)
                     echo "  PANS Compressed Ratio: $pans_cr" >> $output_file

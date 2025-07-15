@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source ./config.sh
+
 echo "=============================="
 echo "Running U2 Compression Test..."
 echo "=============================="
