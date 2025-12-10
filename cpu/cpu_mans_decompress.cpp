@@ -10,28 +10,12 @@
 #include <chrono>
 #include <cstdlib>  // system, remove
 
+#include "file_utils.h"
 struct MansHeader {
     std::uint8_t codec;  // 1 = ADM, 2 = ANS
 };
 static_assert(sizeof(MansHeader) == 1, "MansHeader must be 1 byte");
 
-bool load_u8_file(const std::string& filename, std::vector<std::uint8_t>& data) {
-    std::ifstream in(filename, std::ios::binary | std::ios::ate);
-    if (!in.is_open()) return false;
-    std::streamsize size = in.tellg();
-    if (size < 0) return false;
-    in.seekg(0, std::ios::beg);
-    data.resize(static_cast<std::size_t>(size));
-    return static_cast<bool>(in.read(reinterpret_cast<char*>(data.data()), size));
-}
-
-bool save_u8_file(const std::string& filename, const std::vector<std::uint8_t>& data) {
-    std::ofstream out(filename, std::ios::binary);
-    if (!out.is_open()) return false;
-    out.write(reinterpret_cast<const char*>(data.data()),
-              static_cast<std::streamsize>(data.size()));
-    return static_cast<bool>(out);
-}
 
 int main(int argc, char** argv) {
     if (argc < 4) {
