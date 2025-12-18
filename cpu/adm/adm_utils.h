@@ -5,7 +5,20 @@
 #include <vector>
 #include <cstdint>
 
-// 声明模板函数
+template<typename T>
+void adm_compress(
+    const std::vector<T>& input_data,
+    std::vector<std::uint8_t>& output
+);
+
+
+template<typename T>
+void adm_decompress(
+    const std::vector<std::uint8_t>& merged,
+    std::vector<T>& recovered
+);
+
+
 template<typename T>
 void adm_compress_and_benchmark(
     const std::vector<T>& input_data,

@@ -4,11 +4,20 @@ project(MANS_ROOT LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release")
+endif()
+
+message(STATUS "==========================================")
+message(STATUS "  *** CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE} ***")
+message(STATUS "==========================================")
+
 # -------------------------------
 # platform control
 # -------------------------------
 set(VALID_PLATFORMS "cpu" "nv" "amd" "all" "cpu_nv" "cpu_amd")
-set(TARGET_PLATFORM "cpu" CACHE STRING "Target platform to build: cpu / nv / amd / all / cpu_nv / cpu_amd")
+set(TARGET_PLATFORM "cpu_nv" CACHE STRING "Target platform to build: cpu / nv / amd / all / cpu_nv / cpu_amd")
 if (NOT TARGET_PLATFORM IN_LIST VALID_PLATFORMS)
   message(FATAL_ERROR "Invalid TARGET_PLATFORM='${TARGET_PLATFORM}'. Must be one of: ${VALID_PLATFORMS}.")
 endif()

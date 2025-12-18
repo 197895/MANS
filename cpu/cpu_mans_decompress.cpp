@@ -21,44 +21,33 @@ static_assert(sizeof(MansHeader) == 1, "MansHeader must be 1 byte");
 
 // ===== strip_header_and_save =====
 // 与 prepend_header_and_save 呼应
-inline bool strip_header_and_save(
-    const std::string& input_file,
-    const std::string& payload_file,
+inline bool strip_header(
+    const std::vector<std::uint8_t>& all,
+    std::vector<std::uint8_t>& payload,
     std::uint8_t& codec)
 {
-    std::vector<std::uint8_t> all;
-    if (!load_u8_file(input_file, all)) {
-        std::cerr << "Failed to load input file: " << input_file << "\n";
-        return false;
-    }
     if (all.size() < sizeof(MansHeader)) {
         std::cerr << "File too small, invalid mans format.\n";
         return false;
     }
-
     codec = all[0];
-    std::vector<std::uint8_t> payload(all.begin() + 1, all.end());
-
-    if (!save_u8_file(payload_file, payload)) {
-        std::cerr << "Failed to write payload file: " << payload_file << "\n";
-        return false;
-    }
-
+    payload.assign(all.begin() + 1, all.end());
     return true;
 }
 
 
 int main(int argc, char** argv) {
-    if (argc < 4) {
+    if (argc < 5) {
         std::cerr << "Use: " << argv[0]
-                  << " <u2|u4> <input_bin_file> <output_u2/u4_file>\n";
+                  << " <u2|u4> <input_bin_file> <output_u2/u4_file> <save_adm>\n";
         return 1;
     }
 
     std::string dtype       = argv[1];  // "u2" / "u4"
     std::string input_file  = argv[2];
     std::string output_file = argv[3];
-
+    std::string save_adm_flag = argv[4];
+    bool save_adm = (save_adm_flag == "1");
     bool is_u2 = (dtype == "-u2" || dtype == "u2");
     bool is_u4 = (dtype == "-u4" || dtype == "u4");
 
@@ -67,18 +56,21 @@ int main(int argc, char** argv) {
                   << "\nUse: u2 or u4 (or -u2/-u4)\n";
         return 1;
     }
-
-    // 提取 header 和 payload
-    std::string tmp_in = input_file + ".tmp_payload";
     std::uint8_t codec;
-    if (!strip_header_and_save(input_file, tmp_in, codec)) {
+    std::string tmp_pans_out;
+    
+    std::vector<std::uint8_t> input_data_with_header;
+    std::vector<std::uint8_t> input_data;
+    std::vector<std::uint8_t> pans_data;
+    if(!load_u8_file(input_file, input_data_with_header)) {
+        std::cerr << "Failed to load input file: " << input_file << "\n";
         return 1;
     }
 
-    // PANS 解压：直接调用函数
-    std::string tmp_pans_out;
-    int precision = 10;
-
+    if (!strip_header(input_data_with_header, input_data, codec)) {
+        return 1;
+    }
+    
     if (codec == 1) {
         tmp_pans_out = output_file + ".adm";
     } else if (codec == 2) {
@@ -87,39 +79,45 @@ int main(int argc, char** argv) {
         std::cerr << "Unknown codec type in mans header: " << int(codec) << "\n";
         return 1;
     }
-
-    decompressFileWithANS(
-        tmp_in.c_str(),
-        tmp_pans_out.c_str(),
-        precision
+    // PANS 解压：直接调用函数
+    pans_decompress_and_benchmark(
+        input_data,
+        pans_data
     );
-
-    // ADM 解压
-    if (codec == 1) {
-        std::vector<std::uint8_t> adm_data;
-        if (!load_u8_file(tmp_pans_out, adm_data)) {
-            std::cerr << "Failed to load ADM tmp file: " << tmp_pans_out << "\n";
+    if(codec==2){ //如果不用ADM，则直接输出结果
+        if(!save_u8_file(output_file, pans_data)) {
+            std::cerr << "Failed to write PANS output file: " << output_file << "\n";
             return 1;
         }
-
-        if (is_u2) {
-            std::vector<std::uint16_t> recovered;
-            adm_decompress_and_benchmark(adm_data, recovered);
-            if (!save_u16_file(output_file, recovered)) {
-                std::cerr << "Failed to write output file: " << output_file << "\n";
+    }
+    else{
+        if(save_adm){
+            if (!save_u8_file(tmp_pans_out, pans_data)) {
+                std::cerr << "Failed to write ADM tmp file: " << tmp_pans_out << "\n";
                 return 1;
             }
-        } else {
-            std::vector<std::uint32_t> recovered;
-            adm_decompress_and_benchmark(adm_data, recovered);
-            if (!save_u32_file(output_file, recovered)) {
-                std::cerr << "Failed to write output file: " << output_file << "\n";
-                return 1;
+        }
+        // ADM 解压
+        if (codec == 1) {
+            if (is_u2) {
+                std::vector<std::uint16_t> recovered;
+                adm_decompress_and_benchmark(pans_data, recovered);
+                if (!save_u16_file(output_file, recovered)) {
+                    std::cerr << "Failed to write output file: " << output_file << "\n";
+                    return 1;
+                }
+            } else {
+                std::vector<std::uint32_t> recovered;
+                adm_decompress_and_benchmark(pans_data, recovered);
+                if (!save_u32_file(output_file, recovered)) {
+                    std::cerr << "Failed to write output file: " << output_file << "\n";
+                    return 1;
+                }
             }
         }
     }
 
-    std::remove(tmp_in.c_str());
+    
 
     std::cout << "mans decompress finished! Output: " << output_file << "\n";
     return 0;

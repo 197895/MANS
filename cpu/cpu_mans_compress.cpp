@@ -52,41 +52,31 @@ bool decide_use_adm(const std::vector<T>& data, const std::string& dtype) {
     return (max_block_diff <= threshold);
 }
 
-inline bool prepend_header_and_save(
-    const std::string& payload_file,
-    const std::string& output_file,
+inline void prepend_header(
+    const std::vector<std::uint8_t>& payload,
+    std::vector<std::uint8_t>& final_payload,
     std::uint8_t codec)
 {
-    std::vector<std::uint8_t> payload;
-    if (!load_u8_file(payload_file, payload)) {
-        std::cerr << "Failed to load payload file: " << payload_file << "\n";
-        return false;
-    }
-
-    std::vector<std::uint8_t> final_data;
-    final_data.reserve(1 + payload.size());
-    final_data.push_back(codec);
-    final_data.insert(final_data.end(), payload.begin(), payload.end());
-
-    if (!save_u8_file(output_file, final_data)) {
-        std::cerr << "Failed to write output file: " << output_file << "\n";
-        return false;
-    }
-
-    return true;
+    final_payload.clear();
+    final_payload.reserve(1 + payload.size());
+    final_payload.push_back(codec);
+    final_payload.insert(final_payload.end(),
+                         payload.begin(),
+                         payload.end());
 }
 
 int main(int argc, char** argv) {
-    if (argc < 4) {
+    if (argc < 5) {
         std::cerr << "Use: " << argv[0]
-                  << " <u2|u4> <input_file> <output_bin_file>\n";
+                  << " <u2|u4> <input_file> <output_bin_file> <save_adm>\n";
         return 1;
     }
 
     std::string dtype       = argv[1];
     std::string input_file  = argv[2];
     std::string output_file = argv[3];
-
+    std::string save_adm_flag = argv[4];
+    bool save_adm = (save_adm_flag == "1");
     bool is_u2 = (dtype == "-u2" || dtype == "u2");
     bool is_u4 = (dtype == "-u4" || dtype == "u4");
 
@@ -124,51 +114,57 @@ int main(int argc, char** argv) {
     }
 
     std::string tmp_out = output_file + ".adm";
-    std::string tmp_pans_in;
-
-    std::vector<std::uint8_t> adm_output;
+    std::vector<std::uint8_t> pans_input;
+    std::vector<std::uint8_t> pans_output;
 
     MansHeader mh{};
     if (use_adm) {
         mh.codec = 1; // ADM
         if (is_u2) {
-            adm_compress_and_benchmark(data_u16, adm_output);
+            adm_compress_and_benchmark(data_u16, pans_input);
         } else {
-            adm_compress_and_benchmark(data_u32, adm_output);
+            adm_compress_and_benchmark(data_u32, pans_input);
         }
-        if (!save_u8_file(tmp_out, adm_output)) {
-            std::cerr << "Failed to write ADM output: " << tmp_out << "\n";
-            return 1;
+        if (save_adm){
+            if (!save_u8_file(tmp_out, pans_input)) {
+                std::cerr << "Failed to write ADM output: " << tmp_out << "\n";
+                return 1;
+            }
         }
-        tmp_pans_in = tmp_out;
+
     } else {
         mh.codec = 2; // without ADM
-        tmp_pans_in = input_file;
+        if (is_u2) {
+            pans_input.resize(data_u16.size() * sizeof(std::uint16_t));
+            if (!data_u16.empty()) {
+                std::memcpy(pans_input.data(),
+                            data_u16.data(),
+                            pans_input.size());
+            }
+        } else { // is_u4
+            pans_input.resize(data_u32.size() * sizeof(std::uint32_t));
+            if (!data_u32.empty()) {
+                std::memcpy(pans_input.data(),
+                            data_u32.data(),
+                            pans_input.size());
+            }
+        }
     }
 
-    // PANS 压缩：直接调用函数
-    std::string tmp_pans_out = output_file;
-    uint32_t batchSize = 0;
-    uint32_t compressedSize = 0;
-    int precision = 10;
 
-    compressFileWithANS(
-        tmp_pans_in.c_str(),
-        tmp_pans_out.c_str(),
-        batchSize,
-        compressedSize,
-        precision
+    pans_compress_and_benchmark(
+        pans_input,
+        pans_output
     );
 
-    if (compressedSize > 0) {
-        std::printf("[pans] compress ratio: %f\n", 1.0 * batchSize / compressedSize);
-    }
-
-    // 封装后的调用
-    if (!prepend_header_and_save(tmp_pans_out, output_file, mh.codec)) {
+    std::vector<std::uint8_t> final_output;
+    std::cout<<"codec:"<<int(mh.codec)<<"\n";
+    prepend_header(pans_output, final_output, mh.codec);    
+ 
+    if (!save_u8_file(output_file, final_output)) {
+        std::cerr << "Failed to write Final output: " << output_file << "\n";
         return 1;
     }
-
     std::cout << "mans compress finished! Write to " << output_file
               << " (codec=" << int(mh.codec) << ")\n";
     return 0;

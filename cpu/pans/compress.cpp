@@ -1,28 +1,30 @@
 #include <iostream>
 #include <cstdint>
 #include "pans_utils.h"
-
+#include "../file_utils.h"
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <input.file> <output.file>" << std::endl;
         return 1;
     }
     
-    uint32_t batchSize = 0;
-    uint32_t compressedSize = 0;
-    int precision = 10; 
-    
-    compressFileWithANS(
-        argv[1], 
-        argv[2],
-        batchSize,
-        compressedSize,
-        precision
+    // 读取输入文件
+    std::string inputFilePath = argv[1];
+    std::string outputFilePath = argv[2];
+    std::vector<std::uint8_t> inputData;
+    std::vector<std::uint8_t> outputData;
+    if(!load_u8_file(inputFilePath, inputData)) {
+        std::cerr << "Failed to load input file: " << inputFilePath << std::endl;
+        return 1;
+    }
+
+    pans_compress_and_benchmark(
+        inputData, 
+        outputData
     );
-        
-    // 避免除以0的潜在风险
-    if (compressedSize > 0) {
-        printf("compress ratio: %f\n", 1.0 * batchSize / compressedSize);
+    if(!save_u8_file(outputFilePath, outputData)) {
+        std::cerr << "Failed to save output file: " << outputFilePath << std::endl;
+        return 1;
     }
     std::cout << "Compression completed successfully." << std::endl;
     
