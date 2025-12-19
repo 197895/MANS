@@ -3,3 +3,4 @@ figure/
 MANS_figure/
 *.py
 build/
+.vscode
