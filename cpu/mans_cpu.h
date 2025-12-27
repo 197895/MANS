@@ -1,0 +1,30 @@
+#pragma once
+#include <vector>
+#include <string>
+#include "../mans_defs.h" 
+namespace mans {
+namespace cpu {
+
+
+void compress_internal(
+    const void* input_data, 
+    size_t length, 
+    const MansParams& params, 
+    std::vector<uint8_t>& out,
+    bool save_adm, 
+    const std::string& dump_path,
+    bool open_benchmark
+);
+
+
+void decompress_internal(
+    const std::vector<uint8_t>& input_data, 
+    const MansParams& params, 
+    std::vector<uint8_t>& out,
+    bool save_adm, 
+    const std::string& dump_path,
+    bool open_benchmark
+);
+
+}
+}

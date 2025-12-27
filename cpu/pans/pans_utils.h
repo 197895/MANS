@@ -10,7 +10,8 @@ void pans_compress(
     std::vector<uint8_t>& inputData,
     std::vector<uint8_t>& compressedData,
     uint32_t& batchSize,
-    uint32_t& compressedSize
+    uint32_t& compressedSize,
+    double &duration
 );
 
 // tool function：pans_compressed_data -> raw_data or adm_compressed_data
@@ -18,7 +19,8 @@ void pans_decompress(
     std::vector<uint8_t>& compressedData,
     std::vector<uint8_t>& decompressedData,
     uint32_t& batchSize,
-    uint32_t& compressedSize
+    uint32_t& compressedSize,
+    double &duration
 );
 
 // benchmark: internally calls pans_compress, precision uses the macro PANS_PRECISION
