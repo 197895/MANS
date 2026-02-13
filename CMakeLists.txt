@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
-project(MANS_ROOT LANGUAGES CXX)
+project(MANS_ROOT LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(BUILD_HDF5_PLUGIN "Build HDF5 compression filter plugin (H5Z-MANS)" ON)
+option(HDF5_PREFER_PARALLEL "Prefer parallel HDF5 if available" ON)
 
 # -------------------------------
 # platform control
@@ -44,6 +47,11 @@ if(BUILD_CPU)
   # root dir：build/cpu
   set(cpu_root_binary_dir ${CMAKE_BINARY_DIR}/bin/cpu)
 
+  add_library(mans_file_codec STATIC cpu/mans_file_codec.cpp)
+  set_property(TARGET mans_file_codec PROPERTY POSITION_INDEPENDENT_CODE ON)
+  target_compile_options(mans_file_codec PRIVATE -O3 -fopenmp -march=native)
+  target_link_libraries(mans_file_codec PRIVATE OpenMP::OpenMP_CXX)
+
   # ========== ADM ==========
 
   # adm dir：build/cpu/adm
@@ -79,6 +87,7 @@ if(BUILD_CPU)
       RUNTIME_OUTPUT_DIRECTORY ${cpu_root_binary_dir}
   )
   target_compile_options(cpu_mans_compress PRIVATE -O3)
+  target_link_libraries(cpu_mans_compress PRIVATE mans_file_codec)
 
   # mans decompress：build/cpu/cpu_mans_decompress
   add_executable(cpu_mans_decompress cpu/cpu_mans_decompress.cpp)
@@ -86,6 +95,7 @@ if(BUILD_CPU)
       RUNTIME_OUTPUT_DIRECTORY ${cpu_root_binary_dir}
   )
   target_compile_options(cpu_mans_decompress PRIVATE -O3)
+  target_link_libraries(cpu_mans_decompress PRIVATE mans_file_codec)
 
   # ========== CPU / pans submodule ==========
   set(cpu_pans_binary_dir ${cpu_root_binary_dir}/pans)
@@ -189,3 +199,10 @@ if(BUILD_AMD)
 
 endif()
 
+if(BUILD_HDF5_PLUGIN)
+  if(BUILD_CPU)
+    add_subdirectory(tools/H5Z-MANS)
+  else()
+    message(WARNING "BUILD_HDF5_PLUGIN=ON but TARGET_PLATFORM does not include CPU; skipping tools/H5Z-MANS.")
+  endif()
+endif()
