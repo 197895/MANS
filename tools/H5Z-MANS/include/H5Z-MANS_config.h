@@ -33,8 +33,6 @@ struct FieldMeta {
 class MansConfig {
 public:
     MansConfig() {
-        std::memset(&params_, 0, sizeof(params_));
-
         params_.adm_center_calc_threads = 32;
         params_.adm_encode_threads = 32;
         params_.adm_warp_reduce_threads = 32;
@@ -43,7 +41,6 @@ public:
         params_.adm_restore_signals_threads = 32;
         params_.adm_decode_values_threads = 16;
         params_.adm_decide_threads = 16;
-        params_.mode = mans::Mode::R;
 
         register_field("backend", offsetof(mans::MansParams, backend), ParamType::UINT32);
         register_field("dtype", offsetof(mans::MansParams, dtype), ParamType::UINT32);

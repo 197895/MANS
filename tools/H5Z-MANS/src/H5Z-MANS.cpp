@@ -28,12 +28,9 @@ bool parse_mans_params_from_cd(const unsigned int* cd_values,
         return false;
     }
 
-    std::memset(&out, 0, sizeof(out));
+    out = mans::MansParams{};
     const std::size_t words_to_copy = std::min(cd_nelmts, kMansParamsWords);
     std::memcpy(&out, cd_values, words_to_copy * sizeof(unsigned int));
-    if (cd_nelmts < kMansParamsWords) {
-        out.mode = mans::Mode::R;
-    }
     return true;
 }
 
