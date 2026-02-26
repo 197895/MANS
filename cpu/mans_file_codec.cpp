@@ -222,8 +222,6 @@ bool should_use_adm_t(const std::vector<std::uint8_t>& raw_bytes, std::uint32_t 
         }
     }
 
-    std::cout << "[mans] " << (sizeof(T) == 2 ? "u2" : "u4")
-              << " block range (block_size=512): max_diff=" << max_block_diff << "\n";
     return (max_block_diff <= static_cast<std::uint64_t>(adm_threshold));
 }
 
