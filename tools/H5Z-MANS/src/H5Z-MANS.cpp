@@ -16,8 +16,26 @@
 namespace {
 
 constexpr unsigned int H5Z_FILTER_MANS_ORIGINAL_ID = 32003;
+constexpr std::size_t kMansParamsWords = sizeof(mans::MansParams) / sizeof(unsigned int);
+constexpr std::size_t kLegacyMansParamsWords = kMansParamsWords - 1;
 
 using mans::h5::safe_malloc;
+
+bool parse_mans_params_from_cd(const unsigned int* cd_values,
+                               std::size_t cd_nelmts,
+                               mans::MansParams& out) {
+    if (!cd_values || cd_nelmts < kLegacyMansParamsWords) {
+        return false;
+    }
+
+    std::memset(&out, 0, sizeof(out));
+    const std::size_t words_to_copy = std::min(cd_nelmts, kMansParamsWords);
+    std::memcpy(&out, cd_values, words_to_copy * sizeof(unsigned int));
+    if (cd_nelmts < kMansParamsWords) {
+        out.mode = mans::Mode::R;
+    }
+    return true;
+}
 
 bool run_mans_codec(bool reverse,
                     const mans::MansParams& params,
@@ -37,11 +55,17 @@ bool run_mans_codec(bool reverse,
         std::cerr << "[H5Z-MANS-original Error] Input pointer is null.\n";
         return false;
     }
+    if (!reverse && params.mode != mans::Mode::P && params.mode != mans::Mode::R) {
+        std::cerr << "[H5Z-MANS-original Error] Unsupported mode in MansParams: "
+                  << params.mode << "\n";
+        return false;
+    }
 
     const auto* input = static_cast<const std::uint8_t*>(in_data);
     int rc = reverse
         ? mans::cpu::mans_decompress_bytes(dtype, input, in_size, out_data)
-        : mans::cpu::mans_compress_bytes(dtype, input, in_size, out_data, params.adm_threshold);
+        : mans::cpu::mans_compress_bytes(dtype, input, in_size, out_data,
+                                         params.adm_threshold, params.mode);
     if (rc != 0) {
         std::cerr << "[H5Z-MANS-original Error] Codec function call failed, ret=" << rc << "\n";
         return false;
@@ -69,8 +93,7 @@ static herr_t H5Z_set_local_mans(hid_t dcpl_id, hid_t type_id, hid_t space_id) {
         return 0;
     }
 
-    const std::size_t required_params = sizeof(mans::MansParams) / sizeof(unsigned int);
-    if (cd_nelmts < required_params) {
+    if (cd_nelmts < kLegacyMansParamsWords) {
         return 0;
     }
 
@@ -78,6 +101,13 @@ static herr_t H5Z_set_local_mans(hid_t dcpl_id, hid_t type_id, hid_t space_id) {
     if (H5Pget_filter_by_id2(dcpl_id, H5Z_FILTER_MANS_ORIGINAL_ID, &flags,
                              &cd_nelmts, cd_values.data(), 0, nullptr, nullptr) < 0) {
         return 0;
+    }
+    mans::MansParams params{};
+    if (!parse_mans_params_from_cd(cd_values.data(), cd_nelmts, params)) {
+        return 0;
+    }
+    if (params.mode != mans::Mode::P && params.mode != mans::Mode::R) {
+        params.mode = mans::Mode::R;
     }
 
     std::vector<hsize_t> chunk_dims(static_cast<std::size_t>(ndims), 0);
@@ -98,10 +128,12 @@ static herr_t H5Z_set_local_mans(hid_t dcpl_id, hid_t type_id, hid_t space_id) {
         return 0;
     }
 
-    const std::size_t desired_nelmts = std::max(cd_nelmts, required_params + 1);
+    const std::size_t desired_nelmts = std::max(cd_nelmts, kMansParamsWords + 1);
     std::vector<unsigned int> out_values(desired_nelmts, 0);
-    std::memcpy(out_values.data(), cd_values.data(), cd_nelmts * sizeof(unsigned int));
-    out_values[required_params] = static_cast<unsigned int>(chunk_elements);
+    std::memcpy(out_values.data(), cd_values.data(),
+                std::min(cd_nelmts, desired_nelmts) * sizeof(unsigned int));
+    std::memcpy(out_values.data(), &params, sizeof(params));
+    out_values[kMansParamsWords] = static_cast<unsigned int>(chunk_elements);
 
     if (H5Pmodify_filter(dcpl_id, H5Z_FILTER_MANS_ORIGINAL_ID, flags,
                          desired_nelmts, out_values.data()) < 0) {
@@ -136,14 +168,16 @@ static std::size_t H5Z_filter_mans(unsigned int flags,
                                    std::size_t nbytes,
                                    std::size_t* buf_size,
                                    void** buf) {
-    const std::size_t required_params = sizeof(mans::MansParams) / sizeof(unsigned int);
-    if (cd_nelmts < required_params || !cd_values || !buf || !buf_size) {
+    if (cd_nelmts < kLegacyMansParamsWords || !cd_values || !buf || !buf_size) {
         std::cerr << "[H5Z-MANS-original Error] Invalid filter arguments.\n";
         return 0;
     }
 
     mans::MansParams params{};
-    std::memcpy(&params, cd_values, sizeof(mans::MansParams));
+    if (!parse_mans_params_from_cd(cd_values, cd_nelmts, params)) {
+        std::cerr << "[H5Z-MANS-original Error] Failed to parse MansParams.\n";
+        return 0;
+    }
 
     std::size_t elem_size = 0;
     if (params.dtype == mans::DataType::U16) {
@@ -166,15 +200,20 @@ static std::size_t H5Z_filter_mans(unsigned int flags,
         return 0;
     }
 
-    if (reverse && cd_nelmts > required_params) {
-        std::size_t expected_elements = static_cast<std::size_t>(cd_values[required_params]);
-        if (expected_elements > 0) {
-            std::size_t expected_bytes = expected_elements * elem_size;
-            if (output.size() != expected_bytes) {
-                std::cerr << "[H5Z-MANS-original Error] Decompressed bytes mismatch. expected="
-                          << expected_bytes << ", got=" << output.size() << "\n";
-                return 0;
-            }
+    std::size_t expected_elements = 0;
+    if (reverse) {
+        if (cd_nelmts > kMansParamsWords) {
+            expected_elements = static_cast<std::size_t>(cd_values[kMansParamsWords]);
+        } else if (cd_nelmts > kLegacyMansParamsWords) {
+            expected_elements = static_cast<std::size_t>(cd_values[kLegacyMansParamsWords]);
+        }
+    }
+    if (expected_elements > 0) {
+        std::size_t expected_bytes = expected_elements * elem_size;
+        if (output.size() != expected_bytes) {
+            std::cerr << "[H5Z-MANS-original Error] Decompressed bytes mismatch. expected="
+                      << expected_bytes << ", got=" << output.size() << "\n";
+            return 0;
         }
     }
 

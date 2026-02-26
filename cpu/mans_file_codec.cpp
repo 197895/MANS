@@ -16,17 +16,130 @@
 #include "adm/adm.h"
 #include "pans/CpuANSDecode.h"
 #include "pans/CpuANSEncode.h"
+extern "C" {
+#include "fse/include/fse.h"
+}
 
 namespace mans {
 namespace cpu {
 namespace {
 
 constexpr std::uint32_t kDefaultThreshold = 4000;
+constexpr std::uint32_t kModeP = 0;
+constexpr std::uint32_t kModeR = 1;
+constexpr std::uint8_t kCodecAdmPans = 1;
+constexpr std::uint8_t kCodecRawPans = 2;
+constexpr std::uint8_t kCodecAdmFse = 3;
+constexpr std::uint8_t kCodecRawFse = 4;
+constexpr std::size_t kFseFrameHeaderSize = 20;
+constexpr std::size_t kFseBlockHeaderSize = 9;
+constexpr std::uint32_t kFseFrameBlockSize = 32U * 1024U;
 
 struct MansHeader {
-    std::uint8_t codec; // 1 = ADM, 2 = ANS
+    std::uint8_t codec; // 1=ADM+PANS, 2=RAW+PANS, 3=ADM+FSE, 4=RAW+FSE
 };
 static_assert(sizeof(MansHeader) == 1, "MansHeader must be 1 byte");
+
+std::uint32_t normalize_mode(std::uint32_t mode) {
+    return (mode == kModeP) ? kModeP : kModeR;
+}
+
+std::uint32_t read_le32(const std::uint8_t* p) {
+    return static_cast<std::uint32_t>(p[0]) |
+           (static_cast<std::uint32_t>(p[1]) << 8) |
+           (static_cast<std::uint32_t>(p[2]) << 16) |
+           (static_cast<std::uint32_t>(p[3]) << 24);
+}
+
+std::uint64_t read_le64(const std::uint8_t* p) {
+    return static_cast<std::uint64_t>(read_le32(p)) |
+           (static_cast<std::uint64_t>(read_le32(p + 4)) << 32);
+}
+
+bool parse_fse_frame(const std::uint8_t* compressed_data,
+                     std::size_t compressed_len,
+                     std::size_t& frame_len,
+                     std::size_t& decompressed_len,
+                     std::string* error = nullptr) {
+    frame_len = 0;
+    decompressed_len = 0;
+
+    auto set_error = [&](const char* msg) {
+        if (error) {
+            *error = msg;
+        }
+    };
+
+    if (!compressed_data) {
+        set_error("compressed_data is null");
+        return false;
+    }
+    if (compressed_len < kFseFrameHeaderSize) {
+        set_error("compressed_len too small for FSE frame header");
+        return false;
+    }
+    if (compressed_data[0] != 'M' || compressed_data[1] != 'F' ||
+        compressed_data[2] != 'S' || compressed_data[3] != 'E') {
+        set_error("invalid FSE magic");
+        return false;
+    }
+
+    const std::uint32_t block_size = read_le32(compressed_data + 4);
+    if (block_size != kFseFrameBlockSize) {
+        set_error("unexpected FSE block size");
+        return false;
+    }
+
+    const std::uint64_t raw_size_u64 = read_le64(compressed_data + 8);
+    if (raw_size_u64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        set_error("raw size overflows size_t");
+        return false;
+    }
+    const std::size_t raw_size = static_cast<std::size_t>(raw_size_u64);
+    const std::uint32_t block_count = read_le32(compressed_data + 16);
+
+    std::size_t offset = kFseFrameHeaderSize;
+    std::size_t raw_acc = 0;
+    for (std::uint32_t i = 0; i < block_count; ++i) {
+        if (offset > compressed_len || compressed_len - offset < kFseBlockHeaderSize) {
+            set_error("truncated FSE block header");
+            return false;
+        }
+
+        const std::uint8_t mode = compressed_data[offset];
+        const std::uint32_t block_raw = read_le32(compressed_data + offset + 1);
+        const std::uint32_t block_stored = read_le32(compressed_data + offset + 5);
+        offset += kFseBlockHeaderSize;
+
+        if (mode > 2) {
+            set_error("invalid FSE block mode");
+            return false;
+        }
+        if (block_stored > compressed_len - offset) {
+            set_error("truncated FSE block payload");
+            return false;
+        }
+        if (raw_acc > std::numeric_limits<std::size_t>::max() - static_cast<std::size_t>(block_raw)) {
+            set_error("raw size accumulation overflow");
+            return false;
+        }
+        raw_acc += static_cast<std::size_t>(block_raw);
+        offset += static_cast<std::size_t>(block_stored);
+    }
+
+    if (raw_acc != raw_size) {
+        set_error("raw size mismatch in FSE frame");
+        return false;
+    }
+    if (offset != compressed_len) {
+        set_error("extra bytes after FSE frame");
+        return false;
+    }
+
+    frame_len = offset;
+    decompressed_len = raw_size;
+    return true;
+}
 
 bool load_u8_file(const std::string& filename, std::vector<std::uint8_t>& data) {
     std::ifstream in(filename, std::ios::binary | std::ios::ate);
@@ -377,12 +490,57 @@ bool pans_decompress_bytes(const std::vector<std::uint8_t>& in, std::vector<std:
     return true;
 }
 
+bool fse_compress_bytes(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t>& out) {
+    if (in.empty()) {
+        out.clear();
+        return true;
+    }
+
+    const std::size_t bound = FSE_compressBound(in.size());
+    if (bound == 0) {
+        return false;
+    }
+
+    out.resize(bound);
+    const std::size_t csize = FSE_compress(out.data(), bound, in.data(), in.size());
+    if (FSE_isError(csize)) {
+        return false;
+    }
+    out.resize(csize);
+    return true;
+}
+
+bool fse_decompress_bytes(const std::vector<std::uint8_t>& in, std::vector<std::uint8_t>& out) {
+    if (in.empty()) {
+        out.clear();
+        return true;
+    }
+
+    std::size_t frame_len = 0;
+    std::size_t raw_len = 0;
+    std::string parse_error;
+    if (!parse_fse_frame(in.data(), in.size(), frame_len, raw_len, &parse_error)) {
+        return false;
+    }
+    if (frame_len != in.size()) {
+        return false;
+    }
+
+    out.resize(raw_len);
+    const std::size_t dsize = FSE_decompress(out.data(), raw_len, in.data(), in.size());
+    if (FSE_isError(dsize) || dsize != raw_len) {
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int mans_compress_file(const std::string& dtype,
                        const std::string& input_file,
                        const std::string& output_file,
-                       const std::string& cpu_bin_dir) {
+                       const std::string& cpu_bin_dir,
+                       std::uint32_t mans_mode) {
     (void)cpu_bin_dir;
 
     std::vector<std::uint8_t> input_bytes;
@@ -392,7 +550,8 @@ int mans_compress_file(const std::string& dtype,
     }
 
     std::vector<std::uint8_t> final_data;
-    int rc = mans_compress_bytes(dtype, input_bytes.data(), input_bytes.size(), final_data, kDefaultThreshold);
+    int rc = mans_compress_bytes(dtype, input_bytes.data(), input_bytes.size(), final_data,
+                                 kDefaultThreshold, mans_mode);
     if (rc != 0) {
         return rc;
     }
@@ -439,7 +598,8 @@ int mans_compress_bytes(const std::string& dtype,
                         const std::uint8_t* input_data,
                         std::size_t input_size,
                         std::vector<std::uint8_t>& output_data,
-                        std::uint32_t adm_threshold) {
+                        std::uint32_t adm_threshold,
+                        std::uint32_t mans_mode) {
     const bool is_u2 = (dtype == "-u2" || dtype == "u2");
     const bool is_u4 = (dtype == "-u4" || dtype == "u4");
     if (!is_u2 && !is_u4) {
@@ -472,16 +632,29 @@ int mans_compress_bytes(const std::string& dtype,
         codec_input = std::move(input_bytes);
     }
 
-    std::vector<std::uint8_t> pans_output;
-    if (!pans_compress_bytes(codec_input, pans_output)) {
-        std::cerr << "PANS compress failed.\n";
-        return 1;
+    const std::uint32_t mode = normalize_mode(mans_mode);
+    const bool use_fse = (mode == kModeR);
+
+    std::vector<std::uint8_t> stage2_output;
+    if (use_fse) {
+        if (!fse_compress_bytes(codec_input, stage2_output)) {
+            std::cerr << "FSE compress failed.\n";
+            return 1;
+        }
+    } else {
+        if (!pans_compress_bytes(codec_input, stage2_output)) {
+            std::cerr << "PANS compress failed.\n";
+            return 1;
+        }
     }
 
     output_data.clear();
-    output_data.reserve(1 + pans_output.size());
-    output_data.push_back(use_adm ? 1U : 2U);
-    output_data.insert(output_data.end(), pans_output.begin(), pans_output.end());
+    output_data.reserve(1 + stage2_output.size());
+    const std::uint8_t codec = use_adm
+        ? (use_fse ? kCodecAdmFse : kCodecAdmPans)
+        : (use_fse ? kCodecRawFse : kCodecRawPans);
+    output_data.push_back(codec);
+    output_data.insert(output_data.end(), stage2_output.begin(), stage2_output.end());
     return 0;
 }
 
@@ -507,27 +680,50 @@ int mans_decompress_bytes(const std::string& dtype,
 
     MansHeader mh{};
     mh.codec = input_data[0];
-    std::vector<std::uint8_t> pans_payload(input_data + 1, input_data + input_size);
 
-    std::vector<std::uint8_t> pans_decoded;
-    if (!pans_decompress_bytes(pans_payload, pans_decoded)) {
-        std::cerr << "PANS decompress failed.\n";
+    bool use_adm = false;
+    bool use_fse = false;
+    if (mh.codec == kCodecAdmPans) {
+        use_adm = true;
+        use_fse = false;
+    } else if (mh.codec == kCodecRawPans) {
+        use_adm = false;
+        use_fse = false;
+    } else if (mh.codec == kCodecAdmFse) {
+        use_adm = true;
+        use_fse = true;
+    } else if (mh.codec == kCodecRawFse) {
+        use_adm = false;
+        use_fse = true;
+    } else {
+        std::cerr << "Unknown codec type in mans header: " << int(mh.codec) << "\n";
         return 1;
     }
 
+    std::vector<std::uint8_t> stage2_payload(input_data + 1, input_data + input_size);
+    std::vector<std::uint8_t> stage2_decoded;
+    if (use_fse) {
+        if (!fse_decompress_bytes(stage2_payload, stage2_decoded)) {
+            std::cerr << "FSE decompress failed.\n";
+            return 1;
+        }
+    } else {
+        if (!pans_decompress_bytes(stage2_payload, stage2_decoded)) {
+            std::cerr << "PANS decompress failed.\n";
+            return 1;
+        }
+    }
+
     output_data.clear();
-    if (mh.codec == 1) {
-        bool ok = is_u2 ? adm_decompress_bytes_t<std::uint16_t>(pans_decoded, output_data)
-                        : adm_decompress_bytes_t<std::uint32_t>(pans_decoded, output_data);
+    if (use_adm) {
+        bool ok = is_u2 ? adm_decompress_bytes_t<std::uint16_t>(stage2_decoded, output_data)
+                        : adm_decompress_bytes_t<std::uint32_t>(stage2_decoded, output_data);
         if (!ok) {
             std::cerr << "ADM decompress failed.\n";
             return 1;
         }
-    } else if (mh.codec == 2) {
-        output_data = std::move(pans_decoded);
     } else {
-        std::cerr << "Unknown codec type in mans header: " << int(mh.codec) << "\n";
-        return 1;
+        output_data = std::move(stage2_decoded);
     }
 
     return 0;

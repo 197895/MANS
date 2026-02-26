@@ -43,9 +43,11 @@ public:
         params_.adm_restore_signals_threads = 32;
         params_.adm_decode_values_threads = 16;
         params_.adm_decide_threads = 16;
+        params_.mode = mans::Mode::R;
 
         register_field("backend", offsetof(mans::MansParams, backend), ParamType::UINT32);
         register_field("dtype", offsetof(mans::MansParams, dtype), ParamType::UINT32);
+        register_field("mode", offsetof(mans::MansParams, mode), ParamType::UINT32);
         register_field("adm_threshold", offsetof(mans::MansParams, adm_threshold), ParamType::UINT32);
         register_field("adm_decide_threads", offsetof(mans::MansParams, adm_decide_threads), ParamType::UINT32);
         register_field("adm_center_calc_threads", offsetof(mans::MansParams, adm_center_calc_threads), ParamType::UINT32);

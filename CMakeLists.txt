@@ -47,10 +47,12 @@ if(BUILD_CPU)
   # root dir：build/cpu
   set(cpu_root_binary_dir ${CMAKE_BINARY_DIR}/bin/cpu)
 
+  add_subdirectory(cpu/fse)
+
   add_library(mans_file_codec STATIC cpu/mans_file_codec.cpp)
   set_property(TARGET mans_file_codec PROPERTY POSITION_INDEPENDENT_CODE ON)
   target_compile_options(mans_file_codec PRIVATE -O3 -fopenmp -march=native)
-  target_link_libraries(mans_file_codec PRIVATE OpenMP::OpenMP_CXX)
+  target_link_libraries(mans_file_codec PRIVATE OpenMP::OpenMP_CXX PUBLIC fse_core)
 
   # ========== ADM ==========
 
