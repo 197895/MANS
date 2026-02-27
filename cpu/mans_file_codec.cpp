@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "../mans_timing.h"
 #include "adm/adm.h"
 #include "pans/CpuANSDecode.h"
 #include "pans/CpuANSEncode.h"
@@ -620,8 +621,12 @@ int mans_compress_bytes(const std::string& dtype,
 
     std::vector<std::uint8_t> codec_input;
     if (use_adm) {
-        bool ok = is_u2 ? adm_compress_bytes_t<std::uint16_t>(input_bytes, codec_input)
-                        : adm_compress_bytes_t<std::uint32_t>(input_bytes, codec_input);
+        bool ok = false;
+        {
+            MANS_TIMING_SCOPE("adm_compress");
+            ok = is_u2 ? adm_compress_bytes_t<std::uint16_t>(input_bytes, codec_input)
+                       : adm_compress_bytes_t<std::uint32_t>(input_bytes, codec_input);
+        }
         if (!ok) {
             std::cerr << "ADM compress failed.\n";
             return 1;
@@ -635,12 +640,22 @@ int mans_compress_bytes(const std::string& dtype,
 
     std::vector<std::uint8_t> stage2_output;
     if (use_fse) {
-        if (!fse_compress_bytes(codec_input, stage2_output)) {
+        bool ok = false;
+        {
+            MANS_TIMING_SCOPE("fse_compress");
+            ok = fse_compress_bytes(codec_input, stage2_output);
+        }
+        if (!ok) {
             std::cerr << "FSE compress failed.\n";
             return 1;
         }
     } else {
-        if (!pans_compress_bytes(codec_input, stage2_output)) {
+        bool ok = false;
+        {
+            MANS_TIMING_SCOPE("pans_compress");
+            ok = pans_compress_bytes(codec_input, stage2_output);
+        }
+        if (!ok) {
             std::cerr << "PANS compress failed.\n";
             return 1;
         }
@@ -701,12 +716,22 @@ int mans_decompress_bytes(const std::string& dtype,
     std::vector<std::uint8_t> stage2_payload(input_data + 1, input_data + input_size);
     std::vector<std::uint8_t> stage2_decoded;
     if (use_fse) {
-        if (!fse_decompress_bytes(stage2_payload, stage2_decoded)) {
+        bool ok = false;
+        {
+            MANS_TIMING_SCOPE("fse_decompress");
+            ok = fse_decompress_bytes(stage2_payload, stage2_decoded);
+        }
+        if (!ok) {
             std::cerr << "FSE decompress failed.\n";
             return 1;
         }
     } else {
-        if (!pans_decompress_bytes(stage2_payload, stage2_decoded)) {
+        bool ok = false;
+        {
+            MANS_TIMING_SCOPE("pans_decompress");
+            ok = pans_decompress_bytes(stage2_payload, stage2_decoded);
+        }
+        if (!ok) {
             std::cerr << "PANS decompress failed.\n";
             return 1;
         }
@@ -714,8 +739,12 @@ int mans_decompress_bytes(const std::string& dtype,
 
     output_data.clear();
     if (use_adm) {
-        bool ok = is_u2 ? adm_decompress_bytes_t<std::uint16_t>(stage2_decoded, output_data)
-                        : adm_decompress_bytes_t<std::uint32_t>(stage2_decoded, output_data);
+        bool ok = false;
+        {
+            MANS_TIMING_SCOPE("adm_decompress");
+            ok = is_u2 ? adm_decompress_bytes_t<std::uint16_t>(stage2_decoded, output_data)
+                       : adm_decompress_bytes_t<std::uint32_t>(stage2_decoded, output_data);
+        }
         if (!ok) {
             std::cerr << "ADM decompress failed.\n";
             return 1;

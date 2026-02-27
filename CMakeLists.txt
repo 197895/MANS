@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_HDF5_PLUGIN "Build HDF5 compression filter plugin (H5Z-MANS)" ON)
 option(HDF5_PREFER_PARALLEL "Prefer parallel HDF5 if available" ON)
+option(ENABLE_TIMING "Enable timing collection (mans_timing.h)" ON)
+
+if(ENABLE_TIMING)
+  add_compile_definitions(ENABLE_TIMING)
+endif()
 
 # -------------------------------
 # platform control

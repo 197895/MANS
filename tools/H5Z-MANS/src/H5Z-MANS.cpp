@@ -2,16 +2,23 @@
 #include <hdf5.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "H5Z-MANS_config.h"
+#include "mans_timing.h"
 #include "cpu/mans_file_codec.h"
+
+#if defined(H5_HAVE_PARALLEL)
+#include <mpi.h>
+#endif
 
 namespace {
 
@@ -20,6 +27,59 @@ constexpr std::size_t kMansParamsWords = sizeof(mans::MansParams) / sizeof(unsig
 constexpr std::size_t kLegacyMansParamsWords = kMansParamsWords - 1;
 
 using mans::h5::safe_malloc;
+
+std::once_flag g_timing_dump_once;
+int g_mpi_rank = -1;
+bool g_mpi_rank_set = false;
+std::atomic<int> g_timing_iter_seen{-1};
+
+void maybe_begin_run_from_env() {
+    const char* env = std::getenv("MANS_TIMING_ITER");
+    if (!env || env[0] == '\0') {
+        return;
+    }
+    const int iter = std::atoi(env);
+    if (iter <= 0) {
+        return;
+    }
+    int prev = g_timing_iter_seen.load(std::memory_order_relaxed);
+    if (iter != prev &&
+        g_timing_iter_seen.compare_exchange_strong(prev, iter, std::memory_order_relaxed)) {
+#ifdef ENABLE_TIMING
+        mans::TimingCollector::instance().begin_run();
+#endif
+    }
+}
+
+void dump_plugin_timing() {
+#ifdef ENABLE_TIMING
+    if (g_mpi_rank_set && g_mpi_rank != 0) {
+        return;
+    }
+    const char* path = std::getenv("MANS_TIMING_DUMP_PATH");
+    if (!path || path[0] == '\0') {
+        path = "plugin_timing.csv";
+    }
+    MANS_TIMING_DUMP(path);
+#endif
+}
+
+void register_dump_on_exit() {
+#ifdef ENABLE_TIMING
+    std::call_once(g_timing_dump_once, []() {
+#if defined(H5_HAVE_PARALLEL)
+        int inited = 0;
+        MPI_Initialized(&inited);
+        if (inited) {
+            MPI_Comm_rank(MPI_COMM_WORLD, &g_mpi_rank);
+            g_mpi_rank_set = true;
+        }
+#endif
+        mans::TimingCollector::instance();
+        std::atexit(dump_plugin_timing);
+    });
+#endif
+}
 
 bool parse_mans_params_from_cd(const unsigned int* cd_values,
                                std::size_t cd_nelmts,
@@ -165,6 +225,7 @@ static std::size_t H5Z_filter_mans(unsigned int flags,
                                    std::size_t nbytes,
                                    std::size_t* buf_size,
                                    void** buf) {
+    maybe_begin_run_from_env();
     if (cd_nelmts < kLegacyMansParamsWords || !cd_values || !buf || !buf_size) {
         std::cerr << "[H5Z-MANS-original Error] Invalid filter arguments.\n";
         return 0;
@@ -193,8 +254,16 @@ static std::size_t H5Z_filter_mans(unsigned int flags,
 
     std::vector<std::uint8_t> output;
     const bool reverse = ((flags & H5Z_FLAG_REVERSE) != 0);
-    if (!run_mans_codec(reverse, params, *buf, nbytes, output)) {
-        return 0;
+    if (reverse) {
+        MANS_TIMING_SCOPE("filter/decompress");
+        if (!run_mans_codec(reverse, params, *buf, nbytes, output)) {
+            return 0;
+        }
+    } else {
+        MANS_TIMING_SCOPE("filter/compress");
+        if (!run_mans_codec(reverse, params, *buf, nbytes, output)) {
+            return 0;
+        }
     }
 
     std::size_t expected_elements = 0;
@@ -251,6 +320,7 @@ H5PL_type_t H5PLget_plugin_type(void) {
 }
 
 const void* H5PLget_plugin_info(void) {
+    register_dump_on_exit();
     return H5Z_MANS_ORIGINAL_CLASS;
 }
 
