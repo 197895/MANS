@@ -75,11 +75,15 @@ inline void compress_uint16(
         int warp = thread_idx / cmp_tblock_size;
         int lane = thread_idx % cmp_tblock_size;
         int base_idx = warp * cmp_tblock_size * cmp_chunk + lane * cmp_chunk;
+        const int bytes_per_thread = cmp_chunk * max_bytes_signal_per_ele_16b;
+        uint8_t* bit_out = &tmp_bit_signals[thread_idx * bytes_per_thread];
+        std::memset(bit_out, 0, bytes_per_thread);
 
-        if (base_idx >= num_elements) continue;
+        if (base_idx >= num_elements) {
+            bit_offsets[thread_idx] = 0;
+            continue;
+        }
         int center = centers[warp];
-
-        uint8_t* bit_out = &tmp_bit_signals[thread_idx * cmp_chunk * max_bytes_signal_per_ele_16b];
 
         int bit_offset = 0;
 
@@ -97,8 +101,20 @@ inline void compress_uint16(
         }
 
         bit_offsets[thread_idx] = bit_offset;
-        int length_bytes = (bit_offset + 7) / 8;
-        signal_length[warp] = std::max(signal_length[warp], length_bytes);
+    }
+
+    // Compute per-warp max signal length deterministically (avoid data races).
+    for (int warp = 0; warp < gsize; ++warp) {
+        int max_len = 0;
+        const int base_tid = warp * cmp_tblock_size;
+        for (int lane = 0; lane < cmp_tblock_size; ++lane) {
+            const int bit_offset = bit_offsets[base_tid + lane];
+            const int length_bytes = (bit_offset + 7) / 8;
+            if (length_bytes > max_len) {
+                max_len = length_bytes;
+            }
+        }
+        signal_length[warp] = max_len;
     }
 
     // Fill in the tail bits
@@ -154,7 +170,7 @@ inline void decompress_uint16(
 )
 {
     int num_elements = codes.size();
-    int gsize = output_lengths.size();
+    int gsize = static_cast<int>(output_lengths.size()) - 1;
     int total_threads = gsize * cmp_tblock_size;
 
     // Step 1: Restore signal[]
@@ -270,11 +286,15 @@ inline void compress_uint32(
         int warp = thread_idx / cmp_tblock_size;
         int lane = thread_idx % cmp_tblock_size;
         int base_idx = warp * cmp_tblock_size * cmp_chunk + lane * cmp_chunk;
+        const int bytes_per_thread = cmp_chunk * max_bytes_signal_per_ele_32b;
+        uint8_t* bit_out = &tmp_bit_signals[thread_idx * bytes_per_thread];
+        std::memset(bit_out, 0, bytes_per_thread);
 
-        if (base_idx >= num_elements) continue;
+        if (base_idx >= num_elements) {
+            bit_offsets[thread_idx] = 0;
+            continue;
+        }
         int center = centers[warp];
-
-        uint8_t* bit_out = &tmp_bit_signals[thread_idx * cmp_chunk * max_bytes_signal_per_ele_32b];
 
         int bit_offset = 0;
 
@@ -293,8 +313,20 @@ inline void compress_uint32(
         }
 
         bit_offsets[thread_idx] = bit_offset;
-        int length_bytes = (bit_offset + 7) / 8;
-        signal_length[warp] = std::max(signal_length[warp], length_bytes);
+    }
+
+    // Compute per-warp max signal length deterministically (avoid data races).
+    for (int warp = 0; warp < gsize; ++warp) {
+        int max_len = 0;
+        const int base_tid = warp * cmp_tblock_size;
+        for (int lane = 0; lane < cmp_tblock_size; ++lane) {
+            const int bit_offset = bit_offsets[base_tid + lane];
+            const int length_bytes = (bit_offset + 7) / 8;
+            if (length_bytes > max_len) {
+                max_len = length_bytes;
+            }
+        }
+        signal_length[warp] = max_len;
     }
 
     // Fill in the tail bits
@@ -352,7 +384,7 @@ inline void decompress_uint32(
 )
 {
     int num_elements = codes.size();
-    int gsize = output_lengths.size();
+    int gsize = static_cast<int>(output_lengths.size()) - 1;
     int total_threads = gsize * cmp_tblock_size;
 
     // Step 1: Restore signal[]

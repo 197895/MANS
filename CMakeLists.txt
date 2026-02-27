@@ -96,6 +96,14 @@ if(BUILD_CPU)
   target_compile_options(cpu_mans_compress PRIVATE -O3)
   target_link_libraries(cpu_mans_compress PRIVATE mans_file_codec)
 
+  # mans bench：build/cpu/cpu_mans_bench
+  add_executable(cpu_mans_bench cpu/cpu_mans_bench.cpp)
+  set_target_properties(cpu_mans_bench PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY ${cpu_root_binary_dir}
+  )
+  target_compile_options(cpu_mans_bench PRIVATE -O3)
+  target_link_libraries(cpu_mans_bench PRIVATE mans_file_codec)
+
   # mans decompress：build/cpu/cpu_mans_decompress
   add_executable(cpu_mans_decompress cpu/cpu_mans_decompress.cpp)
   set_target_properties(cpu_mans_decompress PROPERTIES
