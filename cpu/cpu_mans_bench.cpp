@@ -1,13 +1,14 @@
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <initializer_list>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include "../mans_timing.h"
 #include "mans_file_codec.h"
 
 namespace {
@@ -15,10 +16,24 @@ namespace {
 struct BenchStats {
     double comp_ms = 0.0;
     double decomp_ms = 0.0;
+    double comp_should_use_adm_ms = 0.0;
+    double comp_adm_core_ms = 0.0;
+    double comp_entropy_core_ms = 0.0;
+    double decomp_entropy_core_ms = 0.0;
+    double decomp_adm_core_ms = 0.0;
     std::size_t comp_bytes = 0;
     bool ok = true;
     std::string error;
 };
+
+double last_run_sum_ms(std::initializer_list<const char*> labels) {
+#ifdef ENABLE_TIMING
+    return mans::TimingCollector::instance().last_run_sum_ms(labels);
+#else
+    (void)labels;
+    return 0.0;
+#endif
+}
 
 bool load_u8_file(const std::string& path, std::vector<std::uint8_t>& data) {
     std::ifstream in(path, std::ios::binary | std::ios::ate);
@@ -44,36 +59,43 @@ BenchStats run_once(const std::string& dtype,
     BenchStats stats{};
 
     std::vector<std::uint8_t> compressed;
-    auto comp_start = std::chrono::high_resolution_clock::now();
-    int rc = mans::cpu::mans_compress_bytes(dtype,
-                                            input.data(),
-                                            input.size(),
-                                            compressed,
-                                            threshold,
-                                            mode);
-    auto comp_end = std::chrono::high_resolution_clock::now();
-    stats.comp_ms =
-        std::chrono::duration<double, std::milli>(comp_end - comp_start).count();
-    if (rc != 0) {
-        stats.ok = false;
-        stats.error = "Compression failed";
-        return stats;
+    std::vector<std::uint8_t> recovered;
+    {
+        MANS_TIMING_RUN_SCOPE();
+
+        const int comp_rc = mans::cpu::mans_compress_bytes(dtype,
+                                                           input.data(),
+                                                           input.size(),
+                                                           compressed,
+                                                           threshold,
+                                                           mode);
+        if (comp_rc != 0) {
+            stats.ok = false;
+            stats.error = "Compression failed";
+            return stats;
+        }
+
+        const int decomp_rc = mans::cpu::mans_decompress_bytes(dtype,
+                                                               compressed.data(),
+                                                               compressed.size(),
+                                                               recovered);
+        if (decomp_rc != 0) {
+            stats.ok = false;
+            stats.error = "Decompression failed";
+            return stats;
+        }
     }
 
-    std::vector<std::uint8_t> recovered;
-    auto decomp_start = std::chrono::high_resolution_clock::now();
-    rc = mans::cpu::mans_decompress_bytes(dtype,
-                                          compressed.data(),
-                                          compressed.size(),
-                                          recovered);
-    auto decomp_end = std::chrono::high_resolution_clock::now();
-    stats.decomp_ms =
-        std::chrono::duration<double, std::milli>(decomp_end - decomp_start).count();
-    if (rc != 0) {
-        stats.ok = false;
-        stats.error = "Decompression failed";
-        return stats;
-    }
+    stats.comp_should_use_adm_ms = last_run_sum_ms({"mans/should_use_adm"});
+    stats.comp_adm_core_ms = last_run_sum_ms({"mans/adm_encode_core"});
+    stats.comp_entropy_core_ms = last_run_sum_ms({"mans/entropy_encode_core"});
+    stats.decomp_entropy_core_ms = last_run_sum_ms({"mans/entropy_decode_core"});
+    stats.decomp_adm_core_ms = last_run_sum_ms({"mans/adm_decode_core"});
+    stats.comp_ms = stats.comp_should_use_adm_ms +
+                    stats.comp_adm_core_ms +
+                    stats.comp_entropy_core_ms;
+    stats.decomp_ms = stats.decomp_entropy_core_ms +
+                      stats.decomp_adm_core_ms;
 
     if (recovered.size() != input.size() ||
         std::memcmp(recovered.data(), input.data(), input.size()) != 0) {
@@ -145,6 +167,7 @@ int main(int argc, char** argv) {
     double total_comp_ms = 0.0;
     double total_decomp_ms = 0.0;
     double total_comp_bytes = 0.0;
+    MANS_TIMING_RESET();
 
     for (int iter = 0; iter < kIters; ++iter) {
         const BenchStats stats = run_once(input_type, input, threshold, mode);

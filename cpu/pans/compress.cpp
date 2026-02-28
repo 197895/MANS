@@ -1,4 +1,5 @@
 #include "CpuANSEncode.h"
+#include "../../mans_timing.h"
 
 using namespace cpu_ans;
 
@@ -38,28 +39,35 @@ void compressFileWithANS(
     uint32_t* compressedWordsPrefix_host = (uint32_t*)std::aligned_alloc(kBlockAlignment, sizeof(uint32_t) * maxNumCompressedBlocks);
     std::cout<<"encode start!"<<std::endl;
     double comp_time = 999999;
+    MANS_TIMING_RESET();
     for(int i = 0; i < 11; i ++){
-    auto start = std::chrono::high_resolution_clock::now();  
-
-    ansEncode(
-        table,
-        tempHistogram,
-        precision,
-        inPtrs,
-        batchSize,
-        encPtrs,
-        outCompressedSize,
-        headerOut,
-        maxNumCompressedBlocks,
-        uncoalescedBlockStride,
-        compressedBlocks_host,
-        compressedWords_host,
-        compressedWords_host_prefix,
-        compressedWordsPrefix_host);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    if(comp_time > std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1e3)
-      comp_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1e3;  
+      {
+        MANS_TIMING_RUN_SCOPE();
+        MANS_TIMING_START("mans/entropy_encode_core");
+        ansEncode(
+            table,
+            tempHistogram,
+            precision,
+            inPtrs,
+            batchSize,
+            encPtrs,
+            outCompressedSize,
+            headerOut,
+            maxNumCompressedBlocks,
+            uncoalescedBlockStride,
+            compressedBlocks_host,
+            compressedWords_host,
+            compressedWords_host_prefix,
+            compressedWordsPrefix_host);
+        MANS_TIMING_STOP("mans/entropy_encode_core");
+      }
+#ifdef ENABLE_TIMING
+      const double core_ms =
+          mans::TimingCollector::instance().last_run_sum_ms({"mans/entropy_encode_core"});
+      if (comp_time > core_ms) {
+          comp_time = core_ms;
+      }
+#endif
     }
     double c_bw = ( 1.0 * fileSize / 1e6 ) / ( (comp_time) * 1e-3 );  
     std::cout << "comp   time " << std::fixed << std::setprecision(3) << comp_time << " ms B/W "   

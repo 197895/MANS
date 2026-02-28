@@ -1,4 +1,5 @@
 #include "CpuANSDecode.h"
+#include "../../mans_timing.h"
 
 using namespace cpu_ans;
 
@@ -23,18 +24,27 @@ void decompressFileWithANS(
     uint32_t* cdf = (uint32_t*)std::aligned_alloc(kBlockAlignment, sizeof(uint32_t) * (1 << precision));
     std::cout<<"decode start!"<<std::endl;
     double decomp_time = 999999;
+    MANS_TIMING_RESET();
     for(int i = 0; i < 11; i ++){
-    auto start = std::chrono::high_resolution_clock::now();
-    ansDecode(
-        symbol,
-        pdf,
-        cdf,
-        precision,
-        fileCompressedData.data(),
-        decPtrs);
-    auto end = std::chrono::high_resolution_clock::now();  
-    if(decomp_time > std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1e3)
-        decomp_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1e3; 
+      {
+        MANS_TIMING_RUN_SCOPE();
+        MANS_TIMING_START("mans/entropy_decode_core");
+        ansDecode(
+            symbol,
+            pdf,
+            cdf,
+            precision,
+            fileCompressedData.data(),
+            decPtrs);
+        MANS_TIMING_STOP("mans/entropy_decode_core");
+      }
+#ifdef ENABLE_TIMING
+      const double core_ms =
+          mans::TimingCollector::instance().last_run_sum_ms({"mans/entropy_decode_core"});
+      if (decomp_time > core_ms) {
+          decomp_time = core_ms;
+      }
+#endif
     }
     double dc_bw = ( 1.0 * totalCompressedSize / 1e6 ) / ( (decomp_time) * 1e-3 );
     std::cout << "decomp time " << std::fixed << std::setprecision(6) << (decomp_time) << " ms B/W "   
