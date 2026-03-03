@@ -21,6 +21,11 @@ CSV_FILE="${CSV_FILE:-${SCRIPT_DIR}/cpu_mans_bench_u2_results.csv}"
 LOG_DIR="${LOG_DIR:-${SCRIPT_DIR}/log}"
 LOG_FILE="${LOG_FILE:-${LOG_DIR}/cpu_mans_bench_u2.log}"
 
+# Force OpenMP to 32 threads for all bench runs in this script.
+export OMP_NUM_THREADS=32
+export OMP_THREAD_LIMIT=32
+export OMP_DYNAMIC=FALSE
+
 
 mkdir -p "${LOG_DIR}"
 : > "${LOG_FILE}"
@@ -73,6 +78,7 @@ echo "[info] u2_root: ${U2_DATASET_ROOT}" | tee -a "${LOG_FILE}"
 echo "[info] u4_root: ${U4_DATASET_ROOT}" | tee -a "${LOG_FILE}"
 echo "[info] csv: ${CSV_FILE}" | tee -a "${LOG_FILE}"
 echo "[info] log: ${LOG_FILE}" | tee -a "${LOG_FILE}"
+echo "[info] OMP_NUM_THREADS: ${OMP_NUM_THREADS}" | tee -a "${LOG_FILE}"
 
 for i in "${!dataset_files[@]}"; do
     dataset_file="${dataset_files[$i]}"
