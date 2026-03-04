@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0]
                   << " <-u2|-u4> <input.bin> [--mode p|r] [--threshold 4000]"
-                  << " [--csv out.csv]\n";
+                  << " [--csv out.csv] [--timing-csv mans_timing.csv]\n";
         return 1;
     }
 
@@ -128,6 +128,8 @@ int main(int argc, char** argv) {
 
     const std::string input_path = argv[2];
     std::string csv_path;
+    std::string timing_csv_path = "mans_timing.csv";
+    bool timing_csv_explicit = false;
     std::uint32_t mode = 1; // 0=p, 1=r
     std::uint32_t threshold = 4000;
 
@@ -147,10 +149,17 @@ int main(int argc, char** argv) {
             threshold = static_cast<std::uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--csv" && i + 1 < argc) {
             csv_path = argv[++i];
+        } else if (arg == "--timing-csv" && i + 1 < argc) {
+            timing_csv_path = argv[++i];
+            timing_csv_explicit = true;
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             return 1;
         }
+    }
+
+    if (!csv_path.empty() && !timing_csv_explicit) {
+        timing_csv_path = csv_path + ".timing.csv";
     }
 
     std::vector<std::uint8_t> input;
@@ -188,7 +197,11 @@ int main(int argc, char** argv) {
     const double avg_comp_ms = total_comp_ms / denom;
     const double avg_decomp_ms = total_decomp_ms / denom;
     const double avg_comp_bytes = total_comp_bytes / denom;
-    const double ratio_pct = 100.0 * avg_comp_bytes / static_cast<double>(input.size());
+    if (avg_comp_bytes <= 0.0) {
+        std::cerr << "Invalid compressed size average (<= 0).\n";
+        return 1;
+    }
+    const double ratio = static_cast<double>(input.size()) / avg_comp_bytes;
     const double comp_mbps = (static_cast<double>(input.size()) / 1e6) / (avg_comp_ms / 1e3);
     const double decomp_mbps =
         (static_cast<double>(input.size()) / 1e6) / (avg_decomp_ms / 1e3);
@@ -198,6 +211,7 @@ int main(int argc, char** argv) {
     std::cout << "  Input file: " << input_path << "\n";
     std::cout << "  Mode: " << (mode == 1 ? "r" : "p") << "\n";
     std::cout << "  Threshold: " << threshold << "\n";
+    std::cout << "  Timing CSV: " << timing_csv_path << "\n";
     if (!csv_path.empty()) {
         std::cout << "  CSV: " << csv_path << "\n";
     }
@@ -210,13 +224,15 @@ int main(int argc, char** argv) {
               << "\n";
     std::cout << std::string(52, '-') << "\n";
     std::cout << std::left << std::setw(8) << "full"
-              << " | " << std::setw(8) << std::fixed << std::setprecision(2)
-              << ratio_pct << "%"
+              << " | " << std::setw(8) << std::fixed << std::setprecision(8)
+              << ratio
               << " | " << std::setw(13) << std::fixed << std::setprecision(1)
               << comp_mbps
               << " | " << std::setw(13) << std::fixed << std::setprecision(1)
               << decomp_mbps
               << "\n";
+
+    MANS_TIMING_DUMP(timing_csv_path);
 
     if (!csv_path.empty()) {
         std::ofstream csv(csv_path);
@@ -224,10 +240,10 @@ int main(int argc, char** argv) {
             std::cerr << "Failed to open CSV output: " << csv_path << "\n";
             return 1;
         }
-        csv << "chunk_label,chunk_bytes,ratio_pct,comp_mbps,decomp_mbps\n";
+        csv << "chunk_label,chunk_bytes,ratio,comp_mbps,decomp_mbps\n";
         csv << "full,"
             << input.size() << ","
-            << std::fixed << std::setprecision(2) << ratio_pct << ","
+            << std::fixed << std::setprecision(8) << ratio << ","
             << std::fixed << std::setprecision(1) << comp_mbps << ","
             << std::fixed << std::setprecision(1) << decomp_mbps << "\n";
     }
