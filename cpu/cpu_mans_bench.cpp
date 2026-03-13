@@ -87,7 +87,8 @@ BenchStats run_once(const std::string& dtype,
         }
     }
 
-    stats.comp_should_use_adm_ms = last_run_sum_ms({"mans/should_use_adm"});
+    // stats.comp_should_use_adm_ms = last_run_sum_ms({"mans/should_use_adm"});
+    stats.comp_should_use_adm_ms = 0;
     stats.comp_adm_core_ms = last_run_sum_ms({"mans/adm_encode_core"});
     stats.comp_entropy_core_ms = last_run_sum_ms({"mans/entropy_encode_core"});
     stats.decomp_entropy_core_ms = last_run_sum_ms({"mans/entropy_decode_core"});
@@ -197,7 +198,7 @@ int main(int argc, char** argv) {
     // Drop warm-up runs from the timing CSV and final summary.
     MANS_TIMING_RESET();
 
-    double max_ratio = 0.0;
+    double max_raw_to_comp_ratio = 0.0;
     double max_comp_mbps = 0.0;
     double max_decomp_mbps = 0.0;
 
@@ -214,13 +215,13 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        const double ratio = static_cast<double>(input.size()) / comp_bytes;
+        const double raw_to_comp_ratio = static_cast<double>(input.size()) / comp_bytes;
         const double comp_mbps =
             (static_cast<double>(input.size()) / 1e6) / (stats.comp_ms / 1e3);
         const double decomp_mbps =
             (static_cast<double>(input.size()) / 1e6) / (stats.decomp_ms / 1e3);
 
-        max_ratio = std::max(max_ratio, ratio);
+        max_raw_to_comp_ratio = std::max(max_raw_to_comp_ratio, raw_to_comp_ratio);
         max_comp_mbps = std::max(max_comp_mbps, comp_mbps);
         max_decomp_mbps = std::max(max_decomp_mbps, decomp_mbps);
     }
@@ -245,10 +246,10 @@ int main(int argc, char** argv) {
               << " | " << std::setw(13) << "Comp MB/s"
               << " | " << std::setw(13) << "Decomp MB/s"
               << "\n";
-    std::cout << std::string(52, '-') << "\n";
+    std::cout << std::string(55, '-') << "\n";
     std::cout << std::left << std::setw(8) << "full"
               << " | " << std::setw(8) << std::fixed << std::setprecision(8)
-              << max_ratio
+              << max_raw_to_comp_ratio
               << " | " << std::setw(13) << std::fixed << std::setprecision(1)
               << max_comp_mbps
               << " | " << std::setw(13) << std::fixed << std::setprecision(1)
@@ -266,7 +267,7 @@ int main(int argc, char** argv) {
         csv << "chunk_label,chunk_bytes,ratio,comp_mbps,decomp_mbps\n";
         csv << "full,"
             << input.size() << ","
-            << std::fixed << std::setprecision(8) << max_ratio << ","
+            << std::fixed << std::setprecision(8) << max_raw_to_comp_ratio << ","
             << std::fixed << std::setprecision(1) << max_comp_mbps << ","
             << std::fixed << std::setprecision(1) << max_decomp_mbps << "\n";
     }

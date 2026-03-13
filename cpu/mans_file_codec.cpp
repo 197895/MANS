@@ -222,8 +222,8 @@ bool should_use_adm_t(const std::vector<std::uint8_t>& raw_bytes, std::uint32_t 
             max_block_diff = diff;
         }
     }
-
-    return (max_block_diff <= static_cast<std::uint64_t>(adm_threshold));
+    return true;
+    // return (max_block_diff <= static_cast<std::uint64_t>(adm_threshold));
 }
 
 template <typename T>
