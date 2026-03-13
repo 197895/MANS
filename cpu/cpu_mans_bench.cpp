@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -114,7 +115,8 @@ int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0]
                   << " <-u2|-u4> <input.bin> [--mode p|r] [--threshold 4000]"
-                  << " [--csv out.csv] [--timing-csv mans_timing.csv]\n";
+                  << " [--warmup 5] [--iter 10] [--csv out.csv]"
+                  << " [--timing-csv mans_timing.csv]\n";
         return 1;
     }
 
@@ -132,6 +134,8 @@ int main(int argc, char** argv) {
     bool timing_csv_explicit = false;
     std::uint32_t mode = 1; // 0=p, 1=r
     std::uint32_t threshold = 4000;
+    std::size_t warmup_iters = 5;
+    std::size_t bench_iters = 10;
 
     for (int i = 3; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -147,6 +151,10 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--threshold" && i + 1 < argc) {
             threshold = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--warmup" && i + 1 < argc) {
+            warmup_iters = static_cast<std::size_t>(std::stoul(argv[++i]));
+        } else if (arg == "--iter" && i + 1 < argc) {
+            bench_iters = static_cast<std::size_t>(std::stoul(argv[++i]));
         } else if (arg == "--csv" && i + 1 < argc) {
             csv_path = argv[++i];
         } else if (arg == "--timing-csv" && i + 1 < argc) {
@@ -171,51 +179,66 @@ int main(int argc, char** argv) {
         std::cerr << "Input file is empty.\n";
         return 1;
     }
+    if (bench_iters == 0) {
+        std::cerr << "--iter must be greater than 0.\n";
+        return 1;
+    }
 
-    constexpr int kIters = 11;
-    double total_comp_ms = 0.0;
-    double total_decomp_ms = 0.0;
-    double total_comp_bytes = 0.0;
     MANS_TIMING_RESET();
 
-    for (int iter = 0; iter < kIters; ++iter) {
+    for (std::size_t iter = 0; iter < warmup_iters; ++iter) {
+        const BenchStats stats = run_once(input_type, input, threshold, mode);
+        if (!stats.ok) {
+            std::cerr << stats.error << "\n";
+            return 1;
+        }
+    }
+
+    // Drop warm-up runs from the timing CSV and final summary.
+    MANS_TIMING_RESET();
+
+    double max_ratio = 0.0;
+    double max_comp_mbps = 0.0;
+    double max_decomp_mbps = 0.0;
+
+    for (std::size_t iter = 0; iter < bench_iters; ++iter) {
         const BenchStats stats = run_once(input_type, input, threshold, mode);
         if (!stats.ok) {
             std::cerr << stats.error << "\n";
             return 1;
         }
 
-        if (iter == 0) {
-            continue; // warm-up
+        const double comp_bytes = static_cast<double>(stats.comp_bytes);
+        if (comp_bytes <= 0.0) {
+            std::cerr << "Invalid compressed size maximum candidate (<= 0).\n";
+            return 1;
         }
-        total_comp_ms += stats.comp_ms;
-        total_decomp_ms += stats.decomp_ms;
-        total_comp_bytes += static_cast<double>(stats.comp_bytes);
-    }
 
-    const double denom = static_cast<double>(kIters - 1);
-    const double avg_comp_ms = total_comp_ms / denom;
-    const double avg_decomp_ms = total_decomp_ms / denom;
-    const double avg_comp_bytes = total_comp_bytes / denom;
-    if (avg_comp_bytes <= 0.0) {
-        std::cerr << "Invalid compressed size average (<= 0).\n";
-        return 1;
+        const double ratio = static_cast<double>(input.size()) / comp_bytes;
+        const double comp_mbps =
+            (static_cast<double>(input.size()) / 1e6) / (stats.comp_ms / 1e3);
+        const double decomp_mbps =
+            (static_cast<double>(input.size()) / 1e6) / (stats.decomp_ms / 1e3);
+
+        max_ratio = std::max(max_ratio, ratio);
+        max_comp_mbps = std::max(max_comp_mbps, comp_mbps);
+        max_decomp_mbps = std::max(max_decomp_mbps, decomp_mbps);
     }
-    const double ratio = static_cast<double>(input.size()) / avg_comp_bytes;
-    const double comp_mbps = (static_cast<double>(input.size()) / 1e6) / (avg_comp_ms / 1e3);
-    const double decomp_mbps =
-        (static_cast<double>(input.size()) / 1e6) / (avg_decomp_ms / 1e3);
 
     std::cout << "Command-line arguments:\n";
     std::cout << "  Input type: " << input_type << "\n";
     std::cout << "  Input file: " << input_path << "\n";
     std::cout << "  Mode: " << (mode == 1 ? "r" : "p") << "\n";
     std::cout << "  Threshold: " << threshold << "\n";
+    std::cout << "  Warmup runs: " << warmup_iters << "\n";
+    std::cout << "  Iter runs: " << bench_iters << "\n";
     std::cout << "  Timing CSV: " << timing_csv_path << "\n";
     if (!csv_path.empty()) {
         std::cout << "  CSV: " << csv_path << "\n";
     }
     std::cout << "\n";
+    std::cout << "Summary stats: max over " << bench_iters
+              << " measured runs after " << warmup_iters << " warm-up runs\n\n";
 
     std::cout << std::left << std::setw(8) << "Chunk"
               << " | " << std::setw(9) << "Ratio"
@@ -225,11 +248,11 @@ int main(int argc, char** argv) {
     std::cout << std::string(52, '-') << "\n";
     std::cout << std::left << std::setw(8) << "full"
               << " | " << std::setw(8) << std::fixed << std::setprecision(8)
-              << ratio
+              << max_ratio
               << " | " << std::setw(13) << std::fixed << std::setprecision(1)
-              << comp_mbps
+              << max_comp_mbps
               << " | " << std::setw(13) << std::fixed << std::setprecision(1)
-              << decomp_mbps
+              << max_decomp_mbps
               << "\n";
 
     MANS_TIMING_DUMP(timing_csv_path);
@@ -243,9 +266,9 @@ int main(int argc, char** argv) {
         csv << "chunk_label,chunk_bytes,ratio,comp_mbps,decomp_mbps\n";
         csv << "full,"
             << input.size() << ","
-            << std::fixed << std::setprecision(8) << ratio << ","
-            << std::fixed << std::setprecision(1) << comp_mbps << ","
-            << std::fixed << std::setprecision(1) << decomp_mbps << "\n";
+            << std::fixed << std::setprecision(8) << max_ratio << ","
+            << std::fixed << std::setprecision(1) << max_comp_mbps << ","
+            << std::fixed << std::setprecision(1) << max_decomp_mbps << "\n";
     }
 
     return 0;

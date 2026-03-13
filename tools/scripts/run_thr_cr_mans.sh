@@ -16,6 +16,8 @@ MODE="${MODE:-r}"
 BENCH_BIN="${BENCH_BIN:-./bin/cpu/cpu_mans_bench}"
 ALGO="${ALGO:-mans_${MODE}}"
 THRESHOLD="${THRESHOLD:-4000}"
+WARMUP="${WARMUP:-5}"
+ITER="${ITER:-10}"
 
 CSV_FILE="${CSV_FILE:-${SCRIPT_DIR}/cpu_mans_bench_u2_results.csv}"
 LOG_DIR="${LOG_DIR:-${SCRIPT_DIR}/log}"
@@ -78,6 +80,8 @@ echo "[info] u2_root: ${U2_DATASET_ROOT}" | tee -a "${LOG_FILE}"
 echo "[info] u4_root: ${U4_DATASET_ROOT}" | tee -a "${LOG_FILE}"
 echo "[info] csv: ${CSV_FILE}" | tee -a "${LOG_FILE}"
 echo "[info] log: ${LOG_FILE}" | tee -a "${LOG_FILE}"
+echo "[info] warmup: ${WARMUP}" | tee -a "${LOG_FILE}"
+echo "[info] iter: ${ITER}" | tee -a "${LOG_FILE}"
 echo "[info] OMP_NUM_THREADS: ${OMP_NUM_THREADS}" | tee -a "${LOG_FILE}"
 
 for i in "${!dataset_files[@]}"; do
@@ -91,7 +95,7 @@ for i in "${!dataset_files[@]}"; do
     tmp_log="$(mktemp /tmp/cpu_mans_bench_uall.XXXXXX.log)"
 
     echo "[run] (${input_type}) ${dataset_file}" | tee -a "${LOG_FILE}"
-    if (cd "${WORKDIR}" && "${BENCH_BIN}" "${input_type}" "${dataset_file}" --mode "${MODE}" --threshold "${THRESHOLD}" --csv "${tmp_csv}") > "${tmp_log}" 2>&1; then
+    if (cd "${WORKDIR}" && "${BENCH_BIN}" "${input_type}" "${dataset_file}" --mode "${MODE}" --threshold "${THRESHOLD}" --warmup "${WARMUP}" --iter "${ITER}" --csv "${tmp_csv}") > "${tmp_log}" 2>&1; then
         cat "${tmp_log}" >> "${LOG_FILE}"
         wrote_rows=0
         while IFS=, read -r chunk_label chunk_bytes ratio_pct comp_mbps decomp_mbps; do
