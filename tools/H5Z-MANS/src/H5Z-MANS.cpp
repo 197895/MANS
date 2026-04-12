@@ -304,6 +304,18 @@ static void apply_effective_dims_for_chunk_elements(std::size_t actual_elements,
 static herr_t H5Z_set_local_mans(hid_t dcpl_id, hid_t type_id, hid_t space_id) {
     mans::cpu::BufferCache::instance();
 
+    if (dcpl_id < 0 || type_id < 0 || space_id < 0) {
+        return 0;
+    }
+    if (H5Iis_valid(dcpl_id) <= 0 || H5Iis_valid(type_id) <= 0 || H5Iis_valid(space_id) <= 0) {
+        return 0;
+    }
+    if (H5Iget_type(dcpl_id) != H5I_GENPROP_LST ||
+        H5Iget_type(type_id) != H5I_DATATYPE ||
+        H5Iget_type(space_id) != H5I_DATASPACE) {
+        return 0;
+    }
+
     const int ndims = H5Sget_simple_extent_ndims(space_id);
     if (ndims <= 0) {
         return 0;
@@ -401,6 +413,17 @@ static herr_t H5Z_set_local_mans(hid_t dcpl_id, hid_t type_id, hid_t space_id) {
 // =========================================================
 static htri_t H5Z_can_apply_mans(hid_t dcpl_id, hid_t type_id, hid_t space_id)
 {
+    if (dcpl_id < 0 || type_id < 0 || space_id < 0) {
+        return 1;
+    }
+    if (H5Iis_valid(dcpl_id) <= 0 || H5Iis_valid(type_id) <= 0 || H5Iis_valid(space_id) <= 0) {
+        return 1;
+    }
+    if (H5Iget_type(dcpl_id) != H5I_GENPROP_LST ||
+        H5Iget_type(type_id) != H5I_DATATYPE ||
+        H5Iget_type(space_id) != H5I_DATASPACE) {
+        return 1;
+    }
     if (H5Tget_class(type_id) != H5T_INTEGER) {
         std::cerr << "[H5Z-MANS Warning] Datatype is not INTEGER.\n";
         return 0;
